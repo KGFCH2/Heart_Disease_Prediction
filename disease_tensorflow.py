@@ -10,7 +10,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
 from tensorflow.keras.callbacks import EarlyStopping
 import warnings
-import os # <-- 1. Import os
+import os
 
 warnings.filterwarnings('ignore')
 tf.get_logger().setLevel('ERROR')
@@ -22,9 +22,9 @@ feature_order = []
 
 # Define file paths
 csv_data = "data/heart_disease.csv"
-output_dir = "train" # <-- 2. Define your output folder
+output_dir = "train"
 
-# Create the output directory if it doesn't exist (optional, but good practice)
+
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
     print(f"Created directory: {output_dir}")
