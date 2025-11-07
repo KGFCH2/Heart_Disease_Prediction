@@ -420,7 +420,7 @@ Prediction:    <1ms per sample
    ```
 
 3. **Contact**
-   - �‍🏫 Faculty: Dr. Debdutta Pal (Adamas University)
+   - 👩‍🏫 Faculty: Dr. Debdutta Pal (Adamas University)
    - 🐛 Issues: Check project documentation
 
 ---
@@ -566,7 +566,7 @@ To deploy:
 
 **We gratefully acknowledge:**
 - 🏫 Adamas University for platform and resources
-- �‍🏫 Dr. Debdutta Pal for mentoring and guidance
+- 👩‍🏫 Dr. Debdutta Pal for mentoring and guidance
 - 📚 Open-source ML community for libraries
 - 👥 Team members for collaboration and dedication
 
@@ -630,5 +630,13 @@ cd TensorFlow && python disease_tensorflow.py
 Always consult healthcare professionals. See [LICENSE](LICENSE) for full terms.
 
 **📝 License**: MIT | **🔄 Last Updated**: 8th November, 2025
+
+---
+
+<div align="right">
+
+### [⬆️ Move to Top](#-heart-disease-prediction-system)
+
+</div>
 
 </div>
