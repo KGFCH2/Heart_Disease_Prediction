@@ -633,9 +633,9 @@ Always consult healthcare professionals. See [LICENSE](LICENSE) for full terms.
 
 ---
 
-<div align="right">
+<div align="center">
 
-### [⬆️ Move to Top](#-heart-disease-prediction-system)
+### <a href="#-heart-disease-prediction-system">⬆️ Move to Top</a>
 
 </div>
 
