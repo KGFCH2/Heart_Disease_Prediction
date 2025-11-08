@@ -7,7 +7,7 @@
 
 ## 👥 Contributors
 
-- 👨‍💻 **Babin Bid** - Lead Developer
+- 👨‍💻 **Babin Bid** - Developer
 - 👨‍💻 **Rohit Kumar Adak** - Lead Developer
 - 👩‍💻 **Liza Ghosh** - Developer
 - 👩‍💻 **Ritika Pramanick** - Developer
