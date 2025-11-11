@@ -3,7 +3,9 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from sklearn.utils import class_weight
+# from sklearn.utils import class_weight  <-- No longer needed
+import matplotlib
+matplotlib.use('Agg') # Use Agg backend for saving files
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
@@ -11,6 +13,7 @@ from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
 from tensorflow.keras.callbacks import EarlyStopping
 import warnings
 import os
+from imblearn.over_sampling import SMOTE # <-- Import SMOTE
 
 warnings.filterwarnings('ignore')
 tf.get_logger().setLevel('ERROR')
@@ -21,7 +24,7 @@ model = None
 feature_order = []
 
 # Define file paths
-csv_data = "data/heart_disease.csv"
+csv_data = "data/heart_disease.csv" # <-- 1. Fixed path to read from root
 output_dir = "train"
 
 
@@ -30,18 +33,23 @@ if not os.path.exists(output_dir):
     print(f"Created directory: {output_dir}")
 
 try:
-    # --- 3. Fixed bug: Use the variable csv_data, not the string "csv_data" ---
     data = pd.read_csv(csv_data) 
 
+    # --- Preprocessing ---
     num_cols = data.select_dtypes(include=np.number).columns
     for col in num_cols:
         median_val = data[col].median()
-        data[col] = data[col].fillna(median_val)
+        data[col] = data[col].fillna(median_val) # <-- 2. Using median (more robust)
         
     cat_cols = data.select_dtypes(include='object').columns
     for col in cat_cols:
         mode_val = data[col].mode()[0]
         data[col] = data[col].fillna(mode_val)
+
+    # --- 3. (CRITICAL BUG FIX) ---
+    # **Convert Target Variable to 1/0 *BEFORE* anything else**
+    data['Heart Disease Status'] = (data['Heart Disease Status'] == 'Yes').astype(int)
+    # --------------------------------
 
     data['Stress Level'] = data['Stress Level'].map({'Low': 1, 'Medium': 2, 'High': 3})
     
@@ -50,11 +58,11 @@ try:
             le = LabelEncoder()
             data[col] = le.fit_transform(data[col].astype(str))
             label_encoders[col] = le
-            if col == 'Heart Disease Status':
-                print(f"Target mapping for 'Heart Disease Status': {dict(zip(le.classes_, le.transform(le.classes_)))}")
+            # The target 'Heart Disease Status' is now numeric and will be skipped
+            # (which is correct)
 
     X = data.drop('Heart Disease Status', axis=1)
-    y = data['Heart Disease Status']
+    y = data['Heart Disease Status'] # y is now correctly 1s and 0s
     
     feature_order = X.columns.tolist()
     
@@ -67,8 +75,12 @@ try:
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
 
-    class_weights = class_weight.compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
-    class_weight_dict = dict(enumerate(class_weights))
+    # --- 4. Apply SMOTE to fix class imbalance ---
+    print(f"Original training shape: {np.bincount(y_train)}")
+    sm = SMOTE(random_state=42)
+    X_train_res, y_train_res = sm.fit_resample(X_train_scaled, y_train)
+    print(f"Resampled training shape: {np.bincount(y_train_res)}")
+    # -----------------------------------------------
 
     model = Sequential([
         tf.keras.Input(shape=(X_train_scaled.shape[1],)), # Use scaled data shape
@@ -91,14 +103,15 @@ try:
 
     es = EarlyStopping(monitor='val_loss', patience=25, restore_best_weights=True)
 
-    print("\n--- Starting Model Training ---")
+    print("\n--- Starting Model Training on BALANCED data ---")
+    # --- 5. Train on the resampled data ---
     history = model.fit(
-        X_train_scaled, y_train,
+        X_train_res, y_train_res, # <-- Use resampled data
         epochs=200,
         batch_size=32,
-        validation_split=0.15,
+        validation_split=0.15, 
         callbacks=[es],
-        class_weight=class_weight_dict,
+        # class_weight is no longer needed
         verbose=1 
     )
     print("--- Model Training Finished ---")
@@ -111,7 +124,6 @@ try:
     print("\nClassification Report:\n", classification_report(y_test, y_pred, target_names=['No Disease (0)', 'Disease (1)']))
     print("\nConfusion Matrix:\n", confusion_matrix(y_test, y_pred))
 
-    # --- 4. Modified save paths ---
     model_save_path = os.path.join(output_dir, "tf_heart_model_full_features.keras")
     model.save(model_save_path)
     print(f"\nModel saved to '{model_save_path}'")
@@ -210,7 +222,6 @@ try:
         plt.ylim(0, 1.1)
         plt.grid(axis='y', linestyle='--', alpha=0.7)
         
-        # --- 4. Modified save path ---
         pred_plot_path = os.path.join(output_dir, "prediction_confidence.png")
         plt.savefig(pred_plot_path)
         plt.close()
@@ -224,7 +235,6 @@ try:
 
 
 except FileNotFoundError:
-    # --- 3. Updated error message ---
     print(f"Error: The file '{csv_data}' was not found.") 
 except Exception as e:
     print(f"An error occurred: {e}")
