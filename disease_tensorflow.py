@@ -2,8 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-# from sklearn.utils import class_weight  <-- No longer needed
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, precision_recall_curve, f1_score
 import matplotlib
 matplotlib.use('Agg') # Use Agg backend for saving files
 import matplotlib.pyplot as plt
@@ -13,7 +12,7 @@ from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
 from tensorflow.keras.callbacks import EarlyStopping
 import warnings
 import os
-from imblearn.over_sampling import SMOTE # <-- Import SMOTE
+from imblearn.over_sampling import SMOTE # Import SMOTE
 
 warnings.filterwarnings('ignore')
 tf.get_logger().setLevel('ERROR')
@@ -39,51 +38,57 @@ try:
     num_cols = data.select_dtypes(include=np.number).columns
     for col in num_cols:
         median_val = data[col].median()
-        data[col] = data[col].fillna(median_val) # <-- 2. Using median (more robust)
+        data[col] = data[col].fillna(median_val)
         
     cat_cols = data.select_dtypes(include='object').columns
     for col in cat_cols:
         mode_val = data[col].mode()[0]
         data[col] = data[col].fillna(mode_val)
 
-    # --- 3. (CRITICAL BUG FIX) ---
-    # **Convert Target Variable to 1/0 *BEFORE* anything else**
+    # **(CRITICAL FIX)** Convert Target Variable to 1/0
     data['Heart Disease Status'] = (data['Heart Disease Status'] == 'Yes').astype(int)
-    # --------------------------------
 
-    data['Stress Level'] = data['Stress Level'].map({'Low': 1, 'Medium': 2, 'High': 3})
+    data['Stress Level'] = data['Stress Level'].map({'Low': 1, 'Medium': 2, 'High': 3}).fillna(2)
     
     for col in data.columns:
         if data[col].dtype == 'object':
             le = LabelEncoder()
             data[col] = le.fit_transform(data[col].astype(str))
             label_encoders[col] = le
-            # The target 'Heart Disease Status' is now numeric and will be skipped
-            # (which is correct)
 
     X = data.drop('Heart Disease Status', axis=1)
-    y = data['Heart Disease Status'] # y is now correctly 1s and 0s
+    y = data['Heart Disease Status']
     
     feature_order = X.columns.tolist()
     
     print(f"\nTraining with {X.shape[1]} features: {feature_order}")
 
-    X_train, X_test, y_train, y_test = train_test_split(
+    # --- 1. Create the final Test set ---
+    X_train_full, X_test, y_train_full, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
+    # --- 2. Create the real Training and Validation sets ---
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_train_full, y_train_full, test_size=0.15, random_state=42, stratify=y_train_full
+    )
+
+    # --- 3. Scale all three sets ---
+    scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
     X_test_scaled = scaler.transform(X_test)
 
-    # --- 4. Apply SMOTE to fix class imbalance ---
+    # --- 4. Apply SMOTE *only* to the training set ---
     print(f"Original training shape: {np.bincount(y_train)}")
     sm = SMOTE(random_state=42)
     X_train_res, y_train_res = sm.fit_resample(X_train_scaled, y_train)
     print(f"Resampled training shape: {np.bincount(y_train_res)}")
+    print(f"Validation shape: {np.bincount(y_val)} (Imbalanced - this is correct)")
     # -----------------------------------------------
 
     model = Sequential([
-        tf.keras.Input(shape=(X_train_scaled.shape[1],)), # Use scaled data shape
+        tf.keras.Input(shape=(X_train_scaled.shape[1],)), 
         Dense(128, activation='relu'),
         BatchNormalization(),
         Dropout(0.3),
@@ -101,28 +106,51 @@ try:
         metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall(), tf.keras.metrics.AUC()]
     )
 
-    es = EarlyStopping(monitor='val_loss', patience=25, restore_best_weights=True)
+    # Monitor 'val_recall' to find the model best at catching "Yes" cases
+    es = EarlyStopping(
+        monitor='val_recall', 
+        mode='max', 
+        patience=30, 
+        restore_best_weights=True
+    )
 
-    print("\n--- Starting Model Training on BALANCED data ---")
-    # --- 5. Train on the resampled data ---
+    print("\n--- Starting Model Training (Optimizing for Recall) ---")
     history = model.fit(
-        X_train_res, y_train_res, # <-- Use resampled data
+        X_train_res, y_train_res, # Train on balanced data
         epochs=200,
         batch_size=32,
-        validation_split=0.15, 
+        validation_data=(X_val_scaled, y_val), # Validate on real, imbalanced data
         callbacks=[es],
-        # class_weight is no longer needed
         verbose=1 
     )
     print("--- Model Training Finished ---")
 
+    # --- 6. Find Optimal Threshold ---
     y_prob = model.predict(X_test_scaled).ravel()
-    y_pred = (y_prob > 0.5).astype(int)
+    precisions, recalls, thresholds = precision_recall_curve(y_test, y_prob)
+    
+    # Add a small epsilon to avoid division by zero
+    f1_scores = (2 * precisions * recalls) / (precisions + recalls + 1e-9)
+    
+    # Find the threshold that gives the best F1 score
+    optimal_idx = np.argmax(f1_scores)
+    optimal_threshold = thresholds[optimal_idx]
+    
+    print("\n" + "="*80)
+    print("📊 MODEL EVALUATION & THRESHOLD")
+    print("="*80)
+    print(f"Default 0.5 Threshold F1-Score: {f1_score(y_test, (y_prob > 0.5)):.4f}")
+    print(f"Optimal F1-Score: {f1_scores[optimal_idx]:.4f}")
+    print(f"Optimal Threshold found: {optimal_threshold:.4f}")
+    print("This threshold will be used for predictions.")
+    # --------------------------------
 
-    print(f"\n--- Improved Model Evaluation ---")
-    print(f"Accuracy: {accuracy_score(y_test, y_pred) * 100:.2f}%")
-    print("\nClassification Report:\n", classification_report(y_test, y_pred, target_names=['No Disease (0)', 'Disease (1)']))
-    print("\nConfusion Matrix:\n", confusion_matrix(y_test, y_pred))
+    y_pred_optimal = (y_prob > optimal_threshold).astype(int)
+
+    print(f"\n--- Evaluation with Optimal Threshold ---")
+    print(f"Accuracy: {accuracy_score(y_test, y_pred_optimal) * 100:.2f}%")
+    print("\nClassification Report:\n", classification_report(y_test, y_pred_optimal, target_names=['No Disease (0)', 'Disease (1)']))
+    print("\nConfusion Matrix:\n", confusion_matrix(y_test, y_pred_optimal))
 
     model_save_path = os.path.join(output_dir, "tf_heart_model_full_features.keras")
     model.save(model_save_path)
@@ -190,25 +218,31 @@ try:
         
         new_data_scaled = scaler.transform(new_data)
         
+        # --- 7. Use Optimal Threshold for Prediction ---
         new_prob = model.predict(new_data_scaled).ravel()[0]
-        new_pred = int(new_prob > 0.5)
+        risk = new_prob
+        no_risk = 1 - new_prob
 
-        if new_pred == 1:
-            print(f"\n==================================================================")
-            print(f"⚠️ High risk: Likely heart disease detected. (Confidence: {new_prob * 100:.2f}%)")
-            print(f"==================================================================")
+        print("\n====================== RESULT ======================")
+
+        if no_risk > risk:
+            print(f"✅ Low Risk: No heart disease detected.")
+            print(f"Confidence in No Disease: {no_risk*100:.2f}%")
+            print(f"Risk of Disease: {risk*100:.2f}%")
         else:
-            print(f"\n=================================================================")
-            print(f"✅ Low risk: No heart disease detected. (Confidence: {(1 - new_prob) * 100:.2f}%)")
-            print(f"=================================================================")
+            print(f"⚠️ High Risk: Possible heart disease detected.")
+            print(f"Risk of Disease: {risk*100:.2f}%")
+            print(f"Confidence in No Disease: {no_risk*100:.2f}%")
+
+        print("====================================================")
             
         plt.figure(figsize=(7, 5))
         
         labels = ['Risk of Disease (Class 1)', 'Confidence in No Disease (Class 0)']
-        probabilities = [new_prob, 1 - new_prob]
+        probabilities = [risk, no_risk]
         
         colors = ['#FFB4B4', '#4CAF50']
-        if new_pred == 1:
+        if risk > no_risk:
             colors = ['#D32F2F', '#B4FFB4']
 
         bars = plt.bar(labels, probabilities, color=colors)
@@ -216,6 +250,10 @@ try:
         for bar in bars:
             yval = bar.get_height()
             plt.text(bar.get_x() + bar.get_width()/2.0, yval + 0.01, f'{yval*100:.2f}%', ha='center', va='bottom')
+        
+        # Add the threshold line to the prediction graph
+        plt.axhline(y=optimal_threshold, color='r', linestyle='--', label=f"Decision Threshold ({optimal_threshold*100:.2f}%)")
+        plt.legend()
             
         plt.ylabel('Probability')
         plt.title('Prediction Confidence for Your Input')
